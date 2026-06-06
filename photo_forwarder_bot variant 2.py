@@ -1,14 +1,14 @@
 """
 Telegram Photo & Video Forwarder Bot
-- SQLite baza
-- Telegram Stars to'lov
-- Unikal link tizimi
+- Toy egasi to'lov qilib unikal link oladi
+- Mehmonlar link orqali rasm/video yuboradi
+- Bot toy egasining gruppasiga yuboradi
 """
 
 import logging
 import asyncio
 import os
-import sqlite3
+import json
 import secrets
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -26,13 +26,13 @@ from telegram.ext import (
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468983026:AAHxFW8tBhVMPkNaiWWeYri2NIJ_fz1cLt8")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "7156082393"))
-DB_FILE = os.environ.get("DB_FILE", "bot.db")
+DB_FILE = "users.json"
 ALBUM_WAIT_SECONDS = 1.5
 
 PLANS = {
     "plan_1": {"name": "1 oylik",  "stars": 1,  "days": 30,  "emoji": "🥉"},
-    "plan_2": {"name": "2 oylik",  "stars": 750,  "days": 60,  "emoji": "🥈"},
-    "plan_3": {"name": "3 oylik",  "stars": 1000, "days": 90,  "emoji": "🥇"},
+    "plan_2": {"name": "2 oylik",  "stars": 1000,  "days": 60,  "emoji": "🥈"},
+    "plan_3": {"name": "3 oylik",  "stars": 1500, "days": 90,  "emoji": "🥇"},
 }
 
 # ─── LOGGING ───────────────────────────────────────────────────────────────────
@@ -45,60 +45,51 @@ logger = logging.getLogger(__name__)
 
 # ─── DATABASE ──────────────────────────────────────────────────────────────────
 
-def get_conn():
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    return conn
+def load_db() -> dict:
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            return json.load(f)
+    return {"users": {}, "links": {}}
 
-def init_db():
-    os.makedirs(os.path.dirname(DB_FILE), exist_ok=True) if "/" in DB_FILE else None
-    
-    with get_conn() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id     INTEGER PRIMARY KEY,
-                name        TEXT,
-                username    TEXT,
-                expires     TEXT,
-                group_id    INTEGER,
-                plan        TEXT,
-                link_code   TEXT UNIQUE
-            )
-        """)
-        conn.commit()
+def save_db(db: dict):
+    with open(DB_FILE, "w") as f:
+        json.dump(db, f, indent=2)
 
-def get_user(user_id: int):
-    with get_conn() as conn:
-        row = conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
-        return dict(row) if row else None
+def get_user(user_id: int) -> dict | None:
+    return load_db()["users"].get(str(user_id))
 
-def save_user(user_id: int, name: str, username: str, expires: str,
-              group_id, plan: str, link_code: str):
-    with get_conn() as conn:
-        conn.execute("""
-            INSERT INTO users (user_id, name, username, expires, group_id, plan, link_code)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                name=excluded.name, username=excluded.username,
-                expires=excluded.expires, group_id=excluded.group_id,
-                plan=excluded.plan, link_code=excluded.link_code
-        """, (user_id, name, username, expires, group_id, plan, link_code))
-        conn.commit()
+def save_user(user_id: int, data: dict):
+    db = load_db()
+    db["users"][str(user_id)] = data
+    save_db(db)
 
-def update_group(user_id: int, group_id: int):
-    with get_conn() as conn:
-        conn.execute("UPDATE users SET group_id = ? WHERE user_id = ?", (group_id, user_id))
-        conn.commit()
+def get_link_owner(link_code: str) -> dict | None:
+    """Link orqali toy egasini topish."""
+    db = load_db()
+    user_id = db["links"].get(link_code)
+    if not user_id:
+        return None
+    user = db["users"].get(str(user_id))
+    if not user:
+        return None
+    # Link muddati tekshirish
+    expires = datetime.fromisoformat(user["expires"])
+    if datetime.now() > expires:
+        return None
+    return user
 
-def get_user_by_link(link_code: str):
-    with get_conn() as conn:
-        row = conn.execute("SELECT * FROM users WHERE link_code = ?", (link_code,)).fetchone()
-        if not row:
-            return None
-        data = dict(row)
-        if datetime.now() > datetime.fromisoformat(data["expires"]):
-            return None
-        return data
+def generate_link(user_id: int) -> str:
+    """Foydalanuvchi uchun unikal link kodi yaratish."""
+    db = load_db()
+    # Avvalgi linkni o'chirish
+    old_links = [k for k, v in db["links"].items() if v == str(user_id)]
+    for old in old_links:
+        del db["links"][old]
+    # Yangi link
+    code = secrets.token_urlsafe(8)
+    db["links"][code] = str(user_id)
+    save_db(db)
+    return code
 
 def is_subscribed(user_id: int) -> bool:
     user = get_user(user_id)
@@ -106,17 +97,9 @@ def is_subscribed(user_id: int) -> bool:
         return False
     return datetime.now() < datetime.fromisoformat(user["expires"])
 
-def generate_link(user_id: int) -> str:
-    code = secrets.token_urlsafe(8)
-    with get_conn() as conn:
-        conn.execute("UPDATE users SET link_code = ? WHERE user_id = ?", (code, user_id))
-        conn.commit()
-    return code
-
-def get_all_users():
-    with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM users ORDER BY expires DESC").fetchall()
-        return [dict(r) for r in rows]
+def get_group_id(user_id: int) -> int | None:
+    user = get_user(user_id)
+    return user.get("group_id") if user else None
 
 # ─── ALBUM CACHE ───────────────────────────────────────────────────────────────
 
@@ -138,37 +121,53 @@ def plans_keyboard():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
-    args = context.args
+    args = context.args  # /start link_code
 
-    # Admin uchun bepul obuna
-    if user.id == ADMIN_ID and not get_user(user.id):
-        expires = datetime.now() + timedelta(days=36500)
-        code = secrets.token_urlsafe(8)
-        save_user(user.id, user.full_name, user.username,
-                  expires.isoformat(), None, "Admin", None)
-        logger.info(f"Admin obunasi yaratildi: {user.full_name}")
+    # Admin uchun bepul
+    if user.id == ADMIN_ID:
+        db = load_db()
+        if str(user.id) not in db.get("users", {}):
+            expires = datetime.now() + timedelta(days=36500)  # 100 yil
+            code = generate_link(user.id)
+            save_user(user.id, {
+                "name": user.full_name,
+                "username": user.username,
+                "expires": expires.isoformat(),
+                "group_id": None,
+                "plan": "Admin",
+                "link_code": code,
+            })
+            db = load_db()
+            db["links"][code] = str(user.id)
+            save_db(db)
 
-    # Mehmon: link orqali kirdi
+    # ── Mehmon: link orqali kirdi ──
     if args:
         link_code = args[0]
-        owner = get_user_by_link(link_code)
+        owner = get_link_owner(link_code)
+
         if not owner:
             await update.message.reply_text(
                 "❌ Bu link muddati tugagan yoki noto'g'ri.\n"
                 "Toy egasidan yangi link so'rang."
             )
             return
+
+        # Mehmon ma'lumotini saqlaymiz (link_code orqali)
         context.user_data["guest_link"] = link_code
         context.user_data["guest_group"] = owner["group_id"]
+
         await update.message.reply_text(
-            "👋 Xush kelibsiz!\n\n"
-            "📸 Rasm yoki 🎥 video yuboring — "
-            "bot avtomatik gruppaga yuboradi!"
+            f"👋 Xush kelibsiz!\n\n"
+            f"📸 Rasm yoki 🎥 video yuboring — "
+            f"bot avtomatik gruppaga yuboradi!\n\n"
+            f"⚠️ Faqat rasm va video qabul qilinadi."
         )
         return
 
-    # Toy egasi
+    # ── Toy egasi: oddiy /start ──
     user_data = get_user(user.id)
+
     if user_data and is_subscribed(user.id):
         expires = datetime.fromisoformat(user_data["expires"])
         group_id = user_data.get("group_id")
@@ -177,18 +176,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         group_text = f"✅ Gruppa: `{group_id}`" if group_id else "⚠️ Gruppa ulanmagan — /setgroup"
         link_text = (
-            f"🔗 Linkingiz:\n`t.me/{bot_username}?start={link_code}`"
-            if link_code else "⚠️ /mylink buyrug'ini yuboring"
+            f"🔗 Sizning linkingiz:\n`t.me/{bot_username}?start={link_code}`"
+            if link_code else "⚠️ Link yo'q — /mylink"
         )
+
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("🔄 Obunani uzaytirish", callback_data="extend")
         ]])
+
         await update.message.reply_text(
             f"👋 Salom, {user.first_name}!\n\n"
             f"📅 Obuna: *{expires.strftime('%d.%m.%Y')}* gacha\n"
             f"{group_text}\n\n"
             f"{link_text}\n\n"
-            f"Linkni mehmonlaringizga yuboring!",
+            f"Bu linkni mehmonlaringizga yuboring!",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
@@ -196,12 +197,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             f"👋 Salom, {user.first_name}!\n\n"
             f"🤖 Bu bot rasmlarni avtomatik gruppangizga yuboradi.\n"
-            f"Mehmonlarga link ulashасиз — ular rasm yuborganda "
-            f"gruppangizga tushadi!\n\n"
+            f"Mehmonlaringizga link ulashаsiz — ular rasm yuborganda "
+            f"to'g'ridan-to'g'ri gruppangizga tushadi!\n\n"
             f"💎 *Tariflar:*\n"
-            f"🥉 1 oy — 500 Stars\n"
-            f"🥈 2 oy — 750 Stars\n"
-            f"🥇 3 oy — 1000 Stars\n\n"
+            f"🥉 1 oy — 750 Stars\n"
+            f"🥈 2 oy — 1000 Stars\n"
+            f"🥇 3 oy — 1500 Stars\n\n"
             f"Tarif tanlang 👇",
             reply_markup=plans_keyboard(),
             parse_mode="Markdown"
@@ -209,43 +210,58 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def mylink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Toy egasi o'z linkini ko'radi."""
     user = update.effective_user
+
     if not is_subscribed(user.id):
-        await update.message.reply_text("❌ Obunangiz yo'q. /start")
+        await update.message.reply_text("❌ Obunangiz yo'q. /start buyrug'ini yuboring.")
         return
+
     user_data = get_user(user.id)
     if not user_data.get("group_id"):
         await update.message.reply_text("⚠️ Avval gruppangizni ulang: /setgroup")
         return
+
     link_code = user_data.get("link_code")
     if not link_code:
-        await update.message.reply_text("⚠️ /newlink buyrug'i bilan yangi link oling.")
+        await update.message.reply_text("⚠️ Link topilmadi. /newlink buyrug'i bilan yangi link oling.")
         return
+
     bot_username = (await context.bot.get_me()).username
     expires = datetime.fromisoformat(user_data["expires"])
+
     await update.message.reply_text(
         f"🔗 *Sizning linkingiz:*\n"
         f"`t.me/{bot_username}?start={link_code}`\n\n"
-        f"📅 Muddat: *{expires.strftime('%d.%m.%Y')}* gacha",
+        f"📅 Muddat: *{expires.strftime('%d.%m.%Y')}* gacha\n\n"
+        f"Bu linkni mehmonlaringizga yuboring!",
         parse_mode="Markdown"
     )
 
 
 async def newlink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Yangi link olish (eski link o'chadi)."""
     user = update.effective_user
+
     if not is_subscribed(user.id):
-        await update.message.reply_text("❌ Obunangiz yo'q. /start")
+        await update.message.reply_text("❌ Obunangiz yo'q. /start buyrug'ini yuboring.")
         return
+
     user_data = get_user(user.id)
     if not user_data.get("group_id"):
         await update.message.reply_text("⚠️ Avval gruppangizni ulang: /setgroup")
         return
-    code = generate_link(user.id)
+
+    link_code = generate_link(user.id)
+    user_data["link_code"] = link_code
+    save_user(user.id, user_data)
+
     bot_username = (await context.bot.get_me()).username
+
     await update.message.reply_text(
         f"✅ Yangi link yaratildi!\n\n"
         f"🔗 *Linkingiz:*\n"
-        f"`t.me/{bot_username}?start={code}`\n\n"
+        f"`t.me/{bot_username}?start={link_code}`\n\n"
         f"⚠️ Eski link endi ishlamaydi!",
         parse_mode="Markdown"
     )
@@ -254,21 +270,25 @@ async def newlink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
+
     data = query.data
+
     if data == "extend":
         await query.message.reply_text(
-            "🔄 Tarif tanlang 👇",
+            "🔄 Obunani uzaytirish uchun tarif tanlang 👇",
             reply_markup=plans_keyboard()
         )
         return
+
     plan_key = data.replace("buy_", "")
     plan = PLANS.get(plan_key)
     if not plan:
         return
+
     await context.bot.send_invoice(
         chat_id=query.from_user.id,
         title=f"📸 Photo Forwarder — {plan['name']}",
-        description=f"{plan['name']} davomida rasmlarni gruppangizga yuboradi.",
+        description=f"{plan['name']} davomida rasmlaringizni gruppangizga avtomatik yuboradi.",
         payload=plan_key,
         currency="XTR",
         prices=[LabeledPrice(plan["name"], plan["stars"])],
@@ -277,7 +297,10 @@ async def buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.pre_checkout_query
-    await query.answer(ok=query.invoice_payload in PLANS)
+    if query.invoice_payload in PLANS:
+        await query.answer(ok=True)
+    else:
+        await query.answer(ok=False, error_message="Xato yuz berdi.")
 
 
 async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -286,153 +309,140 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
     plan = PLANS[plan_key]
 
     existing = get_user(user.id)
+
+    # Obuna uzaytirilsa — ustiga qo'shiladi
     if existing and is_subscribed(user.id):
-        expires = datetime.fromisoformat(existing["expires"]) + timedelta(days=plan["days"])
+        current_expires = datetime.fromisoformat(existing["expires"])
+        expires = current_expires + timedelta(days=plan["days"])
     else:
         expires = datetime.now() + timedelta(days=plan["days"])
 
     group_id = existing.get("group_id") if existing else None
-    link_code = existing.get("link_code") if existing else None
+    old_link = existing.get("link_code") if existing else None
 
-    save_user(user.id, user.full_name, user.username,
-              expires.isoformat(), group_id, plan["name"], link_code)
+    # Yangi link faqat birinchi marta yaratiladi
+    link_code = old_link if old_link else generate_link(user.id)
+
+    save_user(user.id, {
+        "name": user.full_name,
+        "username": user.username,
+        "expires": expires.isoformat(),
+        "group_id": group_id,
+        "plan": plan["name"],
+        "link_code": link_code,
+    })
+
+    # links jadvalini yangilash
+    db = load_db()
+    db["links"][link_code] = str(user.id)
+    save_db(db)
 
     logger.info(f"To'lov: {user.full_name}, {plan['name']}, {plan['stars']} Stars")
 
     bot_username = (await context.bot.get_me()).username
+
     msg = (
-        f"✅ To'lov qabul qilindi!\n\n"
-        f"{plan['emoji']} *{plan['name']}* faollashtirildi\n"
+        f"✅ To'lov qabul qilindi! Rahmat!\n\n"
+        f"{plan['emoji']} *{plan['name']}* obuna faollashtirildi\n"
         f"📅 Muddat: *{expires.strftime('%d.%m.%Y')}* gacha\n\n"
     )
+
     if group_id:
         msg += (
-            f"🔗 *Linkingiz:*\n"
+            f"🔗 *Sizning linkingiz:*\n"
             f"`t.me/{bot_username}?start={link_code}`\n\n"
-            f"Mehmonlaringizga yuboring!"
+            f"Bu linkni mehmonlaringizga yuboring!"
         )
     else:
-        msg += "Endi /setgroup bilan gruppangizni ulang."
+        msg += "Endi /setgroup buyrug'i bilan gruppangizni ulang."
+
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+
     if not is_subscribed(user.id):
-        await update.message.reply_text("❌ Obunangiz yo'q. /start")
+        await update.message.reply_text("❌ Obunangiz yo'q. /start buyrug'ini yuboring.")
         return
+
     await update.message.reply_text(
-        "📋 *Gruppani ulash:*\n\n"
+        "📋 *Gruppani ulash qadamlari:*\n\n"
         "1️⃣ Botni gruppaga qo'shing\n"
-        "2️⃣ Botni *admin* qiling\n"
+        "2️⃣ Botni gruppada *admin* qiling\n"
         "3️⃣ Gruppa ID ni yuboring\n\n"
-        "📌 ID olish: @userinfobot ga /start yozing\n\n"
-        "Gruppa ID ni yuboring (masalan: `-1001234567890`)",
+        "📌 Gruppa ID olish: @userinfobot ga /start yozing\n\n"
+        "Gruppa ID ni shu yerga yuboring (masalan: `-1001234567890`)",
         parse_mode="Markdown"
     )
     context.user_data["waiting_group"] = True
+
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     text = update.message.text.strip()
 
+    # Mehmon — link orqali kirgan
     if context.user_data.get("guest_link"):
-        await update.message.reply_text(
-            "📸 Faqat rasm yoki 🎥 video yuboring."
-        )
+        await update.message.reply_text("📸 Iltimos, faqat rasm yoki 🎥 video yuboring.")
         return
 
+    # Gruppa ID kutilmoqda
     if context.user_data.get("waiting_group"):
         try:
             group_id = int(text)
-
-            # ID formatini tekshirish
-            if not str(group_id).startswith("-100"):
-                await update.message.reply_text(
-                    "❌ Noto'g'ri guruh ID!\n\n"
-                    "Masalan: -1001234567890"
-                )
-                return
-
             existing = get_user(user.id)
+            if existing:
+                existing["group_id"] = group_id
+                # Agar link yo'q bo'lsa — yaratamiz
+                if not existing.get("link_code"):
+                    link_code = generate_link(user.id)
+                    existing["link_code"] = link_code
+                    db = load_db()
+                    db["links"][link_code] = str(user.id)
+                    save_db(db)
 
-            if not existing:
+                save_user(user.id, existing)
+                context.user_data["waiting_group"] = False
+
+                bot_username = (await context.bot.get_me()).username
+                link_code = existing["link_code"]
+
                 await update.message.reply_text(
-                    "❌ Avval obuna qiling. /start"
+                    f"✅ Gruppa muvaffaqiyatli ulandi!\n\n"
+                    f"🔗 *Sizning linkingiz:*\n"
+                    f"`t.me/{bot_username}?start={link_code}`\n\n"
+                    f"Bu linkni mehmonlaringizga yuboring! 🚀",
+                    parse_mode="Markdown"
                 )
-                return
-
-            # Guruh mavjudligini tekshirish
-            await context.bot.get_chat(group_id)
-
-            me = await context.bot.get_me()
-
-            member = await context.bot.get_chat_member(
-                group_id,
-                me.id
-            )
-
-            if member.status not in ["administrator", "creator"]:
-                await update.message.reply_text(
-                    "❌ Bot guruhda admin emas."
-                )
-                return
-
-            # Hammasi joyida bo'lsa saqlaymiz
-            update_group(user.id, group_id)
-            context.user_data["waiting_group"] = False
-
-            link_code = existing.get("link_code")
-
-            if not link_code:
-                link_code = generate_link(user.id)
-
-            bot_username = me.username
-
-            await update.message.reply_text(
-                f"✅ Gruppa ulandi! ID: `{group_id}`\n\n"
-                f"🔗 *Linkingiz:*\n"
-                f"`t.me/{bot_username}?start={link_code}`\n\n"
-                f"Mehmonlaringizga yuboring! 🚀",
-                parse_mode="Markdown"
-            )
-
+            else:
+                await update.message.reply_text("❌ Avval obuna qiling. /start")
         except ValueError:
             await update.message.reply_text(
-                "❌ Noto'g'ri format!\n\n"
-                "Masalan: `-1001234567890`",
+                "❌ Noto'g'ri format!\n"
+                "Manfiy son kiriting, masalan: `-1001234567890`",
                 parse_mode="Markdown"
             )
-
-        except Exception as e:
-            print(f"GROUP ERROR: {e}")
-
-            await update.message.reply_text(
-                "❌ Bot bu guruhni topa olmadi yoki guruhga qo'shilmagan."
-            )
-
         return
 
+    # Oddiy matn
     if not is_subscribed(user.id):
         await update.message.reply_text(
             "❌ Obunangiz yo'q.",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    "⭐ Obuna qilish",
-                    callback_data="buy_plan_1"
-                )
+                InlineKeyboardButton("⭐ Obuna qilish", callback_data="buy_plan_1")
             ]])
         )
     else:
-        await update.message.reply_text(
-            "📸 Rasm yoki 🎥 video yuboring."
-        )
+        await update.message.reply_text("📸 Rasm yoki 🎥 video yuboring.")
 
-async def send_album(media_group_id: str, context: ContextTypes.DEFAULT_TYPE,
-                     user, group_id: int) -> None:
+
+async def send_album(media_group_id: str, context: ContextTypes.DEFAULT_TYPE, user, group_id: int) -> None:
     await asyncio.sleep(ALBUM_WAIT_SECONDS)
+
     items = album_cache.pop(media_group_id, [])
     album_tasks.pop(media_group_id, None)
+
     if not items:
         return
 
@@ -449,6 +459,7 @@ async def send_album(media_group_id: str, context: ContextTypes.DEFAULT_TYPE,
         + (f" (@{user.username})" if user.username else "")
         + "\n" + " | ".join(parts)
     )
+
     try:
         media = []
         for i, item in enumerate(items):
@@ -467,18 +478,26 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user = update.effective_user
     message = update.message
 
+    # ── Mehmon ──
+    guest_group = context.user_data.get("guest_group")
     guest_link = context.user_data.get("guest_link")
+
     if guest_link:
-        owner = get_user_by_link(guest_link)
+        # Linkni qayta tekshirish (muddati tugaganmi)
+        owner = get_link_owner(guest_link)
         if not owner:
-            await message.reply_text("❌ Linkingiz muddati tugagan. Toy egasidan yangi link so'rang.")
+            await message.reply_text(
+                "❌ Linkingiz muddati tugagan.\n"
+                "Toy egasidan yangi link so'rang."
+            )
             context.user_data.clear()
             return
         group_id = owner["group_id"]
     elif is_subscribed(user.id):
-        group_id = get_user(user.id).get("group_id")
+        # Toy egasi o'zi rasm yubormoqda
+        group_id = get_group_id(user.id)
         if not group_id:
-            await message.reply_text("⚠️ Gruppa ulanmagan. /setgroup")
+            await message.reply_text("⚠️ Gruppa ulanmagan. /setgroup buyrug'ini yuboring.")
             return
     else:
         await message.reply_text(
@@ -490,6 +509,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     media_group_id = message.media_group_id
+
     if message.photo:
         item = {"type": "photo", "file_id": message.photo[-1].file_id}
         label = "📸 Rasm"
@@ -506,7 +526,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         task = asyncio.create_task(send_album(media_group_id, context, user, group_id))
         album_tasks[media_group_id] = task
         if len(album_cache[media_group_id]) == 1:
-            await message.reply_text("✅ Media qabul qilindi!")
+            await message.reply_text("✅ Media qabul qilindi, yuborilmoqda...")
     else:
         caption = (
             f"{label}!\n👤 {user.full_name}"
@@ -520,26 +540,31 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await message.reply_text("✅ Yuborildi!")
         except Exception as e:
             logger.error(f"Xato: {e}")
-            await message.reply_text("❌ Xato yuz berdi. Gruppa ID ni tekshiring.")
+            await message.reply_text("❌ Xato yuz berdi. Gruppa ID to'g'riligini tekshiring.")
 
 
 async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
-    users = get_all_users()
+
+    db = load_db()
+    users = db.get("users", {})
+
     if not users:
         await update.message.reply_text("Hech kim obuna qilmagan.")
         return
-    active = sum(1 for u in users if datetime.now() < datetime.fromisoformat(u["expires"]))
+
+    active = sum(1 for u in users.values() if datetime.now() < datetime.fromisoformat(u["expires"]))
     text = f"👥 Jami: {len(users)} | ✅ Faol: {active}\n\n"
-    for data in users:
+
+    for uid, data in users.items():
         expires = datetime.fromisoformat(data["expires"])
         status = "✅" if datetime.now() < expires else "❌"
         text += (
             f"{status} {data['name']}"
             + (f" (@{data['username']})" if data.get('username') else "")
             + f"\n📅 {expires.strftime('%d.%m.%Y')} | {data.get('plan', '-')}\n"
-            + f"🔗 {data.get('group_id', 'ulanmagan')}\n\n"
+            + f"🔗 Gruppa: {data.get('group_id', 'ulanmagan')}\n\n"
         )
     await update.message.reply_text(text)
 
@@ -547,7 +572,6 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 # ─── MAIN ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    init_db()
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
