@@ -328,7 +328,7 @@ async def setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "2️⃣ Botni *admin* qiling\n"
         "3️⃣ Gruppa ID ni yuboring\n\n"
         "📌 ID olish: @userinfobot ga /start yozing\n\n"
-        "Gruppa ID ni yuboring (masalan: `-1001234567890`)",
+        "Gruppa ID ni yuboring (masalan: `-1234567890`)",
         parse_mode="Markdown"
     )
     context.user_data["waiting_group"] = True
@@ -347,11 +347,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         try:
             group_id = int(text)
 
-            # ID formatini tekshirish
-            if not str(group_id).startswith("-100"):
+            if group_id >= 0:
                 await update.message.reply_text(
-                    "❌ Noto'g'ri guruh ID!\n\n"
-                    "Masalan: -1001234567890"
+                    "❌ Guruh ID manfiy bo'lishi kerak.\n\n"
+                    "Masalan: -1234567890"
                 )
                 return
 
@@ -362,9 +361,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     "❌ Avval obuna qiling. /start"
                 )
                 return
-
-            # Guruh mavjudligini tekshirish
-            await context.bot.get_chat(group_id)
+            
+            chat = await context.bot.get_chat(group_id)
 
             me = await context.bot.get_me()
 
@@ -401,7 +399,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         except ValueError:
             await update.message.reply_text(
                 "❌ Noto'g'ri format!\n\n"
-                "Masalan: `-1001234567890`",
+                "Masalan: `-1234567890`",
                 parse_mode="Markdown"
             )
 
