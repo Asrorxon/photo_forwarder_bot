@@ -270,6 +270,7 @@ async def buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         title=f"📸 Photo Forwarder — {plan['name']}",
         description=f"{plan['name']} davomida rasmlarni gruppangizga yuboradi.",
         payload=plan_key,
+        provider_token= "",
         currency="XTR",
         prices=[LabeledPrice(plan["name"], plan["stars"])],
     )
