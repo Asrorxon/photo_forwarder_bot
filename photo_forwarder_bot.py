@@ -323,12 +323,13 @@ async def setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ Obunangiz yo'q. /start")
         return
     await update.message.reply_text(
-        "📋 *Gruppani ulash:*\n\n"
-        "1️⃣ Botni gruppaga qo'shing\n"
-        "2️⃣ Botni *admin* qiling\n"
-        "3️⃣ Gruppa ID ni yuboring\n\n"
-        "📌 ID olish: @userinfobot ga /start yozing\n\n"
-        "Gruppa ID ni yuboring (masalan: `-1234567890`)",
+        "📋📌 Botni ulash bo'yicha qo'llanma*\n\n"
+        "1️⃣ Telegramda yangi guruh oching\n"
+        "2️⃣ Botni guruhga qo'shing va 'admin' huquqini bering\n"
+        "3️⃣ @userinfobot ga /start yozing 'group' tugmasini bosib guruhingizni tanlang\n\n"
+        "4️⃣ Chiqqan Group ID ni nusxalang\n\n"
+        "6️⃣ Shu ID ni menga yuboring\n\n"
+        "✅ Shundan keyin sizga maxsus link beriladi.\n\n",
         parse_mode="Markdown"
     )
     context.user_data["waiting_group"] = True
