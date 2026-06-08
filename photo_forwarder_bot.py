@@ -30,7 +30,7 @@ DB_FILE = os.environ.get("DB_FILE", "bot.db")
 ALBUM_WAIT_SECONDS = 1.5
 
 PLANS = {
-    "plan_1": {"name": "1 oylik",  "stars": 500,  "days": 30,  "emoji": "🥉"},
+    "plan_1": {"name": "1 oylik",  "stars": 1,  "days": 30,  "emoji": "🥉"},
     "plan_2": {"name": "2 oylik",  "stars": 750,  "days": 60,  "emoji": "🥈"},
     "plan_3": {"name": "3 oylik",  "stars": 1000, "days": 90,  "emoji": "🥇"},
 }
