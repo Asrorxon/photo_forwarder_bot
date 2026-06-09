@@ -324,8 +324,8 @@ async def setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.message.reply_text(
         "*📋📌 Botni ulash bo'yicha qo'llanma*\n\n"
-        "1️⃣ Telegramda yangi guruh oching\n"
-        "2️⃣ Botni guruhga qo'shing va 'admin' huquqini bering\n"
+        "1️⃣ Telegramda yangi guruh oching\n\n"
+        "2️⃣ Botni guruhga qo'shing va 'admin' huquqini bering\n\n"
         "3️⃣ @userinfobot ga /start yozing 'group' tugmasini bosib guruhingizni tanlang\n\n"
         "4️⃣ Chiqqan Group ID ni nusxalang\n\n"
         "6️⃣ Shu ID ni menga yuboring\n\n"
