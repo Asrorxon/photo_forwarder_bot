@@ -214,7 +214,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         #await update.message.reply_text(
             f"👋 Salom, {user.first_name}!\n\n"
             f"🤖 Bu bot rasmlarni avtomatik gruppangizga yuboradi.\n"
-            f"Mehmonlarga link ulashасиз — ular rasm yuborganda "
+            f"Mehmonlarga link ulashаsiz — ular rasm yuborganda "
             f"gruppangizga tushadi!\n\n"
             #f"💎 *Tariflar:*\n"
             #f"🥉 1 oy — 500 Stars\n"
