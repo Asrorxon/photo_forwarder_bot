@@ -101,10 +101,11 @@ def get_user_by_link(link_code: str):
         return data
 
 def is_subscribed(user_id: int) -> bool:
-    user = get_user(user_id)
-    if not user:
-        return False
-    return datetime.now() < datetime.fromisoformat(user["expires"])
+    #user = get_user(user_id)
+    return True
+    # if not user:
+    #    return False
+    # return datetime.now() < datetime.fromisoformat(user["expires"])
 
 def generate_link(user_id: int) -> str:
     code = secrets.token_urlsafe(8)
@@ -193,18 +194,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             parse_mode="Markdown"
         )
     else:
+        existing = get_user(user.id)
+
+        if not existing:
+            expires = datetime.now() + timedelta(days=36500)
+            save_user(
+                user.id,
+                user.full_name,
+                user.username,
+                expires.isoformat(),
+                None,
+                "Free",
+                None
+            )
+
         await update.message.reply_text(
-            f"👋 Salom, {user.first_name}!\n\n"
-            f"🤖 Bu bot rasmlarni avtomatik gruppangizga yuboradi.\n"
-            f"Mehmonlarga link ulashасиз — ular rasm yuborganda "
-            f"gruppangizga tushadi!\n\n"
-            f"💎 *Tariflar:*\n"
-            f"🥉 1 oy — 500 Stars\n"
-            f"🥈 2 oy — 750 Stars\n"
-            f"🥇 3 oy — 1000 Stars\n\n"
-            f"Tarif tanlang 👇",
-            reply_markup=plans_keyboard(),
-            parse_mode="Markdown"
+            "✅ Bot hozircha bepul ishlaydi.\n\n"
+            "Davom etish uchun /setgroup buyrug'ini yuboring."
+        #await update.message.reply_text(
+            #f"👋 Salom, {user.first_name}!\n\n"
+            #f"🤖 Bu bot rasmlarni avtomatik gruppangizga yuboradi.\n"
+            #f"Mehmonlarga link ulashасиз — ular rasm yuborganda "
+            #f"gruppangizga tushadi!\n\n"
+            #f"💎 *Tariflar:*\n"
+            #f"🥉 1 oy — 500 Stars\n"
+            #f"🥈 2 oy — 750 Stars\n"
+            #f"🥇 3 oy — 1000 Stars\n\n"
+            #f"Tarif tanlang 👇",
+            #reply_markup=plans_keyboard(),
+            #parse_mode="Markdown"
         )
 
 
@@ -555,9 +573,9 @@ def main() -> None:
     app.add_handler(CommandHandler("mylink", mylink))
     app.add_handler(CommandHandler("newlink", newlink))
     app.add_handler(CommandHandler("users", admin_users))
-    app.add_handler(CallbackQueryHandler(buy_callback, pattern="^(buy_|extend)"))
-    app.add_handler(PreCheckoutQueryHandler(precheckout))
-    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
+    # app.add_handler(CallbackQueryHandler(buy_callback, pattern="^(buy_|extend)"))
+    # app.add_handler(PreCheckoutQueryHandler(precheckout))
+    # app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, handle_media))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
